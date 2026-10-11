@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>愤怒的奶蛙 Angry Milk Frog</title>
 <!-- 可爱中文手写字体（加载失败时自动回退系统字体，不影响运行） -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -11,14 +11,53 @@
 <style>
 /* ==================== 全局样式 ==================== */
 * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
-html, body { height:100%; overflow:hidden; }
+html, body { height:100%; overflow:hidden; overscroll-behavior:none; }
 body {
   font-family:'ZCOOL KuaiLe','Microsoft YaHei','PingFang SC',sans-serif;
   background:linear-gradient(#8fd8ff 0%, #c8ecb0 45%, #7cc45a 100%);
   display:flex; align-items:center; justify-content:center;
+  position:fixed; inset:0;              /* 手机：防止地址栏伸缩与橡皮筋滚动带动画面 */
+  touch-action:none;
 }
 /* 主容器：始终保持 16:9，与游戏画布同比例 */
 #app { width:min(100vw, 177.78vh); aspect-ratio:16/9; position:relative; }
+/* 手机浏览器地址栏会动态伸缩，用 dvh 让游戏始终占满可用高度 */
+@supports (height: 100dvh) {
+  #app { width: min(100vw, calc(100dvh * 16 / 9)); }
+}
+
+/* ==================== 手机 / 竖屏适配 ==================== */
+/* 竖屏提示（仅手机竖屏出现，点过"继续竖屏"本次会话不再提示） */
+#rotate-tip {
+  position:fixed; inset:0; z-index:99; display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(#8fd8ff 0%, #c8ecb0 45%, #7cc45a 100%); padding:24px; text-align:center;
+}
+#rotate-tip.hidden { display:none; }
+.rotate-card { background:#fff8e7; border-radius:22px; padding:26px 28px; box-shadow:0 14px 40px rgba(0,0,0,.35); }
+.rotate-icon { font-size:52px; animation:rot 2s ease-in-out infinite; }
+@keyframes rot { 0%,35%{ transform:rotate(0deg);} 65%,100%{ transform:rotate(-90deg);} }
+.rotate-card h3 { font-size:24px; color:#4a8f2c; margin:10px 0 6px; }
+.rotate-card p { font-size:15px; color:#6b4a1e; line-height:1.75; margin-bottom:16px; }
+
+/* 小屏（手机横屏）下加大触控目标，并给刘海屏留安全区 */
+@media (max-width: 900px) {
+  #hud { top:calc(6px + env(safe-area-inset-top)); left:calc(6px + env(safe-area-inset-left)); right:calc(6px + env(safe-area-inset-right)); }
+  #hud .chip { font-size:14px; padding:5px 9px; gap:6px; }
+  #hud .btns .btn { font-size:13px; padding:8px 11px; }
+  .frog-ico { width:19px; height:19px; vertical-align:-4px; }
+  #hint { left:auto; right:calc(10px + env(safe-area-inset-right)); bottom:calc(10px + env(safe-area-inset-bottom)); font-size:13px; }
+  #screen-start .title { font-size:42px; letter-spacing:3px; }
+  #screen-start .tips { font-size:14px; padding:8px 14px; line-height:1.7; }
+  #screen-start .subtitle { font-size:16px; }
+  .btn { font-size:18px; padding:10px 22px; }
+  .btn.small { font-size:13px; padding:8px 11px; }
+  .lv-card { width:150px; padding:10px 8px; }
+  .lv-card .lv-name { font-size:14px; }
+  .card { padding:20px 22px; }
+  .card h2 { font-size:26px; }
+  .card-frog { width:104px; }
+  .card .row { font-size:17px; }
+}
 
 .screen { display:none; position:absolute; inset:0; overflow:auto; }
 .screen.active { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:16px; }
@@ -145,6 +184,7 @@ window.addEventListener('error', function (e) {
         </div>
         <div class="chip" id="levelName">第 1 关</div>
         <div class="btns">
+          <button id="btnFull"    class="btn wood small" title="全屏（手机推荐）">⛶ 全屏</button>
           <button id="btnMute"    class="btn wood small" title="声音开关">🔊</button>
           <button id="btnRestart" class="btn wood small" title="重新开始">🔁 重来</button>
           <button id="btnToLevels" class="btn wood small" title="关卡选择">🗺️ 选关</button>
@@ -707,8 +747,9 @@ function toWorld(e){
 }
 canvas.addEventListener('pointerdown', e => {
   if(state !== 'aiming' || !frog) return;
+  SFX.unlock();                             // 手机端需要在首次触摸时激活音频
   const p = toWorld(e);
-  if(dist(p, frog.position) < 70){          // 点中奶蛙附近即可抓住
+  if(dist(p, frog.position) < 70){          // 点中奶蛙附近即可抓住（手机上也够宽松）
     dragging = true;
     canvas.setPointerCapture(e.pointerId);
   }
@@ -727,6 +768,13 @@ canvas.addEventListener('pointerup', () => {
   if(!dragging) return;
   dragging = false;
   launch();
+});
+// 手机上被系统手势/来电打断时：取消本次拉弓（不发弹），避免误发射
+canvas.addEventListener('pointercancel', () => {
+  if(!dragging) return;
+  dragging = false;
+  aimPos = { x: CFG.SLING.x, y: CFG.SLING.y };
+  if(frog) Matter.Body.setPosition(frog, aimPos);
 });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -816,10 +864,14 @@ function boot(){
   Save.load();
   startLogo();
   initUI();
-  // 开发/测试入口：
-  //   #autoplay 直接进第一关 | #lvl=N 直达第 N 关
-  //   #autotest 自动连打三发并结算 | #flight 发射一发后中途探测 | #drag 模拟拉满蓄力
-  const H = location.hash;
+  // 开发/测试入口（哈希可用逗号组合，例如 #drag,phone）：
+  //   #autoplay 直接进第一关 | #lvl=N 直达第 N 关 | #autotest 自动连打三发并结算
+  //   #flight 发射一发后中途探测 | #drag 模拟拉满蓄力 | #phone 强制按手机处理
+  const TOK = location.hash.replace(/^#/, '').split(/[,+&]/).filter(Boolean);
+  const hasTok = t => TOK.indexOf(t) >= 0;
+  const lvlTok = TOK.filter(t => /^lvl=\d+$/.test(t))[0];
+  const H = hasTok('autotest') ? '#autotest' : hasTok('flight') ? '#flight' : hasTok('drag') ? '#drag'
+          : hasTok('autoplay') ? '#autoplay' : (lvlTok ? '#' + lvlTok : '');
   if(H === '#autoplay' || H === '#autotest' || H === '#flight' || H === '#drag'){
     setTimeout(() => {
       const i = Save.data.stars.findIndex(s => s === 0);
@@ -889,6 +941,12 @@ function boot(){
           return { w: Math.round(r.width), h: Math.round(r.height) };   // 元素比例应贴合 434:720
         })(),
         zombieFlip: ZOMBIE_FLIP,                                     // 僵尸是否镜像
+        viewport: window.innerWidth + 'x' + window.innerHeight,      // 手机适配探针
+        mobile: isPhoneScreen(),
+        rotateTip: (function(){
+          const t = document.getElementById('rotate-tip');
+          return !!(t && !t.classList.contains('hidden'));
+        })(),
         worldBodies: world ? Matter.Composite.allBodies(world).length : -1,
         flyTime: +flyTime.toFixed(2), settleT: +settleT.toFixed(2), stateT: +stateT.toFixed(2)
       });
@@ -1566,6 +1624,8 @@ function loadLevel(i){
   lastHint = '';
   updateHUD();
   showScreen('game');
+  // 手机上进关时自动尝试全屏（安卓 Chrome 生效并锁横屏；iOS 无此 API 会静默跳过）
+  if(isPhoneScreen() && !document.fullscreenElement) toggleFullscreen();
 }
 
 /* ---------- 结算弹窗 ---------- */
@@ -1622,6 +1682,47 @@ function playVictoryVideo(onDone){
   }
 }
 
+/* ---------- 手机适配：竖屏提示 + 全屏切换 ---------- */
+// 调试用：#phone 强制按"手机"处理（无头浏览器不方便模拟触摸），可与其它哈希用逗号组合
+let forcePhone = location.hash.replace(/^#/, '').split(/[,+&]/).indexOf('phone') >= 0;
+function isTouchDevice(){
+  if(forcePhone) return true;
+  // 必须是"粗指针（手指）+ 支持触摸"才算手机：触屏笔记本用鼠标时 pointer 为 fine，不会误判
+  const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  const touch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  return coarse && touch;
+}
+function isPhoneScreen(){
+  return isTouchDevice() && Math.min(window.innerWidth, window.innerHeight) < 820;   // 触屏 + 小屏才算手机
+}
+function updateRotateTip(){
+  const tip = $('rotate-tip');
+  if(!tip) return;
+  const portrait = window.innerHeight > window.innerWidth;
+  let dismissed = false;
+  try { dismissed = sessionStorage.getItem('mf_rotate_ok') === '1'; } catch(e){}
+  if(portrait && isPhoneScreen() && !dismissed) tip.classList.remove('hidden');
+  else tip.classList.add('hidden');
+}
+function toggleFullscreen(){
+  const el = document.documentElement;
+  try{
+    if(!document.fullscreenElement){
+      if(!el.requestFullscreen) return;                 // iPhone Safari 不支持，按钮会隐藏
+      const p = el.requestFullscreen({ navigationUI: 'hide' });
+      if(p && p.then) p.then(() => {
+        // 安卓 Chrome：全屏后尝试锁定横屏
+        if(screen.orientation && screen.orientation.lock){
+          const l = screen.orientation.lock('landscape');
+          if(l && l.catch) l.catch(() => {});
+        }
+      }).catch(() => {});
+    } else if(document.exitFullscreen){
+      document.exitFullscreen();
+    }
+  }catch(e){}
+}
+
 /* ---------- 按钮与事件绑定 ---------- */
 function initUI(){
   // 开始界面
@@ -1659,6 +1760,30 @@ function initUI(){
   $('btnLoseLevels').addEventListener('click', () => {
     SFX.click(); hideOverlays(); buildLevelGrid(); showScreen('levels');
   });
+  // ---- 手机适配：全屏按钮 + 竖屏提示 ----
+  if($('btnFull')){
+    if(!document.documentElement.requestFullscreen) $('btnFull').style.display = 'none';  // iPhone Safari 无此 API
+    $('btnFull').addEventListener('click', () => { SFX.unlock(); SFX.click(); toggleFullscreen(); });
+  }
+  (function initRotateTip(){                     // 竖屏提示由 JS 动态创建，保持 HTML 干净
+    if(document.getElementById('rotate-tip')) return;
+    const d = document.createElement('div');
+    d.id = 'rotate-tip';
+    d.className = 'hidden';
+    d.innerHTML = '<div class="rotate-card">'
+      + '<div class="rotate-icon">📱</div>'
+      + '<h3>请横屏游玩</h3>'
+      + '<p>《愤怒的奶蛙》是横版弹弓游戏<br>把手机横过来 + 点全屏，体验最佳</p>'
+      + '<button id="btnRotateOk" class="btn primary small">继续竖屏</button></div>';
+    document.body.appendChild(d);
+    d.querySelector('#btnRotateOk').addEventListener('click', () => {
+      try { sessionStorage.setItem('mf_rotate_ok', '1'); } catch(e){}
+      updateRotateTip();
+    });
+    window.addEventListener('resize', updateRotateTip);
+    window.addEventListener('orientationchange', () => setTimeout(updateRotateTip, 250));
+  })();
+  updateRotateTip();
   // 结算弹框插画：捧腹大笑的奶蛙
   $('winFrog').src = ASSETS.frogBelly;
   $('loseFrog').src = ASSETS.frogBelly;
